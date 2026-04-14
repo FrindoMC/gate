@@ -6,11 +6,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"go.minekube.com/gate/pkg/edition/java/proto/state/states"
-	"go.minekube.com/gate/pkg/edition/java/proto/util/queue"
 	"net"
 	"sync"
 	"time"
+
+	"go.minekube.com/gate/pkg/edition/java/proto/state/states"
+	"go.minekube.com/gate/pkg/edition/java/proto/util/queue"
 
 	"github.com/go-logr/logr"
 	"go.minekube.com/gate/pkg/edition/java/proxy/phase"
@@ -68,6 +69,10 @@ type MinecraftConn interface { // TODO convert to exported struct as this interf
 	// Default is true.
 	SetAutoReading(bool)
 
+	// SetInterceptor sets a PacketInterceptor that is called for every decoded packet.
+	// Return false from the interceptor to drop the packet.
+	SetInterceptor(PacketInterceptor)
+
 	StateChanger
 	PacketWriter
 
@@ -75,6 +80,10 @@ type MinecraftConn interface { // TODO convert to exported struct as this interf
 	Writer() Writer
 	EnablePlayPacketQueue()
 }
+
+// PacketInterceptor is called for every decoded packet before the session handler.
+// Return false to drop the packet.
+type PacketInterceptor func(pc *proto.PacketContext) bool
 
 // Closed returns true if the connection is closed.
 func Closed(c interface{ Context() context.Context }) bool {
@@ -189,11 +198,18 @@ type minecraftConn struct {
 	connType        phase.ConnectionType // Connection type
 	playPacketQueue *queue.PlayPacketQueue
 
+	interceptor PacketInterceptor
+
 	sessionHandlerMu struct {
 		sync.RWMutex
 		activeSessionHandler SessionHandler                     // The current session handler.
 		sessionHandlers      map[*state.Registry]SessionHandler // Session handlers by state.
 	}
+}
+
+// SetInterceptor sets the packet interceptor for this connection.
+func (c *minecraftConn) SetInterceptor(fn PacketInterceptor) {
+	c.interceptor = fn
 }
 
 // StartReadLoop is the main goroutine of this connection and
@@ -218,11 +234,10 @@ func (c *minecraftConn) startReadLoop() {
 			return false
 		}
 
-		// TODO wrap packetCtx into struct with source info
-		// (minecraftConn) and chain into packet interceptor to...
-		//  - packet interception
-		//  - statistics / count bytes
-		//  - in turn call session handler
+		// Call interceptor if set; return false to drop the packet.
+		if c.interceptor != nil && !c.interceptor(packetCtx) {
+			return true
+		}
 
 		// Handle packet by connection's session handler.
 		c.ActiveSessionHandler().HandlePacket(packetCtx)
@@ -395,28 +410,10 @@ func CloseWith(c MinecraftConn, packet proto.Packet) (err error) {
 		err = c.Close()
 	}()
 
-	//c.mu.Lock()
-	//p := c.protocol
-	//s := c.state
-	//c.mu.Unlock()
-
-	//is18 := p.GreaterEqual(proto.Minecraft_1_8)
-	//isLegacyPing := s == state.Handshake || s == state.Status
-	//if is18 || isLegacyPing {
 	if mc, ok := c.(*minecraftConn); ok {
 		mc.knownDisconnect.Store(true)
 	}
 	_ = c.WritePacket(packet)
-	//} else {
-	// ??? 1.7.x versions have a race condition with switching protocol versions,
-	// so just explicitly close the connection after a short while.
-	// c.setAutoReading(false)
-	//go func() {
-	//	time.Sleep(time.Millisecond * 250)
-	//	c.knownDisconnect.Store(true)
-	//	_ = c.WritePacket(packet)
-	//}()
-	//}
 	return
 }
 
@@ -672,6 +669,7 @@ func SendKeepAlive(c interface {
 	}
 	return nil
 }
+
 func randomUint64() uint64 {
 	buf := make([]byte, 8)
 	_, _ = rand.Read(buf) // Always succeeds, no need to check error
