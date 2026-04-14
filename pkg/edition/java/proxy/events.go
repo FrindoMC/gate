@@ -1,9 +1,11 @@
 package proxy
 
 import (
+	"net"
+
+	"go.minekube.com/gate/pkg/edition/java/netmc"
 	"go.minekube.com/gate/pkg/edition/java/proxy/internal/resourcepack"
 	"go.minekube.com/gate/pkg/util/uuid"
-	"net"
 
 	"go.minekube.com/brigodier"
 	"go.minekube.com/common/minecraft/component"
@@ -1160,3 +1162,12 @@ func (r *ReadyEvent) Addr() string { return r.addr }
 // Subscribe to this event to gracefully stop any subtasks,
 // such as plugin dependencies.
 type ShutdownEvent struct{}
+
+type MinecraftConnReadyEvent struct {
+	conn netmc.MinecraftConn
+}
+
+// Conn returns the freshly-created MinecraftConn.
+func (e *MinecraftConnReadyEvent) Conn() netmc.MinecraftConn {
+	return e.conn
+}

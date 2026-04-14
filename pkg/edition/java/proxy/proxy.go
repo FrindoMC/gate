@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go.minekube.com/gate/pkg/edition/java/lite"
-	"go.minekube.com/gate/pkg/edition/java/proto/state"
 	"net"
 	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"go.minekube.com/gate/pkg/edition/java/lite"
+	"go.minekube.com/gate/pkg/edition/java/proto/state"
 
 	"github.com/go-logr/logr"
 	"github.com/pires/go-proxyproto"
@@ -538,7 +539,7 @@ func (p *Proxy) HandleConn(raw net.Conn) {
 		ctx = context.Background()
 	}
 	ctx = logr.NewContext(ctx, p.log)
-
+	
 	// Create client connection
 	conn, readLoop := netmc.NewMinecraftConn(
 		ctx, raw, proto.ServerBound,
@@ -546,6 +547,9 @@ func (p *Proxy) HandleConn(raw net.Conn) {
 		time.Duration(p.cfg.ConnectionTimeout)*time.Millisecond,
 		p.cfg.Compression.Level,
 	)
+
+	p.event.Fire(&MinecraftConnReadyEvent{conn: conn})
+
 	conn.SetActiveSessionHandler(state.Handshake, newHandshakeSessionHandler(conn, &sessionHandlerDeps{
 		proxy:          p,
 		registrar:      p,
